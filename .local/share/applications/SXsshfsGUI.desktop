@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=SXsshfsGUI
+Name[el]=SXsshfsGUI
+GenericName=SXsshfsGUI
+GenericName[el]=SXsshfsGUI
+Comment=Zenity sshfsfs Frontend
+Comment[el]=Γραφικός χειρισμός του sshfsfs μέσω Zenity
+Type=Application
+TryExec=SXsshfsGUI
+Exec=SXsshfsGUI
+Icon=SXsshfsGUI
+Categories=Utility;

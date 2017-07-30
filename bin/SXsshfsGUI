@@ -1,0 +1,136 @@
+#!/bin/bash
+
+#
+#    Copyright (C) 2017  Stamatis X. Mavrogeorgis
+#
+#    Author's Email: stamatis@zirconix.net
+#    Author's Website: http://www.istos.xyz
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+# version 0.1.2 - Added manual entry of remote path
+# version 0.1.1 - Fixed some logic bugs
+# version 0.1.0 - Initial concept
+
+HELPSTRING="\
+* To mount a remote directory, select|\
+'Mount' from the Action drop-down menu,|\
+then select a remote directory from the|\
+Remote Directory drop-down menu and press|\
+the 'Mount/Unmount/Refresh' button|\
+* Select the mount point from the next|\
+File Selection Dialog and press OK|\
+* Enter the password you have set on the|\
+remote machine and press OK|\
+------------------------------------------|\
+* To unmount a remote directory, select|\
+'Unmount' from the Action dropdown, then|\
+select the directory to unmount from the|\
+'Mounted Directories' List and click on|\
+the 'Mount/Unmount/Refresh button|\
+------------------------------------------|\
+* To just refresh the directories list,|\
+click the 'Mount/Unmount/Refresh' button|\
+while 'Refresh' is selected from Action|\
+------------------------------------------|\
+* To exit the program press 'Quit ${0##*/}'" 
+
+showVersion() {
+  echo $(grep '^# version' $(which ${0##*/}) | cut -f3 -d\  | sort -u | tail -1)
+}
+
+[[ $1 == '-V' ]] || [[ $1 == '-v' ]] && showVersion && exit
+
+[[ -x $(which gxmessage) ]] && g='g'
+
+MESSAGECMD="${g}xmessage"
+ZMSGDIM01='--width=320 --height=160'
+ZMSGDIM02='--width=320 --height=192'
+ERRMSG01="This system requires the installation of <span color='#FF0000'>sshfs</span> utility!\n\nThen, you can use <span color='#0000FF'>${0##*/}</span> to mount / unmount directories from remote machines."
+ERRMSG02="You have attempted unsuccessfuly <span color='#FF0000'>3 times</span> with what seems to be the wrong password...\n\nReturning to the initial screen of ${0##*/}..."
+
+[[ ! -x $(which zenity) ]] && $MESSAGECMD -title "${0##*/}" "${0##*/} requires zenity to be installed on this system!" && exit
+
+[[ ! -x $(which sshfs) ]] && { zenity 2>/dev/null $ZMSGDIM01 --error --title "${0##*/}" --text "$ERRMSG01" || true; } && exit
+
+[[ $(pgrep -au $USER zenity | grep "\-\-name=${0##*/}") ]] && { zenity 2>/dev/null --error --text "${0##*/} is already running!" & } && exit
+
+MYVERSION=$(grep '^# version' $0 | cut -f3 -d\  | sort -r | head -1)
+
+RCFILE=$HOME/.SXsshfsGUIrc
+MNTPLIST=$(paste 2>/dev/null -s -d'|' $RCFILE)
+
+while true; do {
+
+  ZOPERATION=$(zenity 2>/dev/null \
+    --cancel-label="Quit ${0##*/}" \
+    --ok-label="Mount/Unmount/Refresh" \
+    --title="${0##*/} $MYVERSION" \
+    --name="${0##*/} $MYVERSION" \
+    --text="Mount / Unmount Remote (SSHFS) Directories" \
+    --forms \
+    --add-combo="Action:" \
+    --combo-values="Mount|Unmount|Refresh" \
+    --add-entry="Remote Directory: " \
+    --add-combo="Remote Directory:" \
+    --combo-values="|$MNTPLIST" \
+    --add-list="Mounted Directories:" \
+    --list-values="$(mount | grep 'fuse.sshfs' | awk '{ print $3 }' | paste -s -d'|')" \
+    --add-combo="Click Drop-down Help:" \
+    --combo-values="$HELPSTRING") 
+
+  [[ $? -ne 0 ]] && break
+
+  ZOPERATION=$(echo $ZOPERATION | sed -e 's@\s@@g' -e 's@,@@')
+  MNTOP=$(echo $ZOPERATION | cut -f1 -d'|')
+  REMDIR=$(echo $ZOPERATION | cut -f2 -d'|')
+  [[ -z $REMDIR ]] && REMDIR=$(echo $ZOPERATION | cut -f3 -d'|')
+  AMNDIR=$(echo $ZOPERATION | cut -f4 -d'|')
+
+  if [[ $MNTOP == "Mount" ]]; then {
+    [[ -z $REMDIR ]] && continue
+
+    REMADDR=$(echo $REMDIR | cut -f1 -d\:)
+    $(ping -c 1 $REMADDR &>/dev/null) || { zenity 2>/dev/null --width=288 --height=128 --error --text "The host <span color='#0000FF'>$REMADDR</span> is not available at this time...\n\nReturning to the initial screen of ${0##*/}..." && continue; }
+
+    MNTDIR=$(zenity 2>/dev/null --title="Select Mount Point" --name="${0##*/} $MYVERSION" --file-selection --directory)
+    MNTDIR=$(echo $MNTDIR | sed -e 's@,@@')
+    [[ $MNTDIR == $HOME ]] || [[ -z $MNTDIR ]] && continue
+    PASSWDCOUNTER=0
+
+    while [[ $PASSWDCOUNTER -lt 3 ]]; do {
+      PASSWD=$(zenity 2>/dev/null --title="Password" --name="${0##*/} $MYVERSION" --password) || break
+      [[ -z $PASSWD ]] && continue
+      [[ -n $REMDIR ]] && [[ -n $MNTDIR ]] && [[ -n $PASSWD ]] \
+        && echo $PASSWD | sshfs &>/dev/null -o password_stdin $REMDIR $MNTDIR \
+        || { ((PASSWDCOUNTER++)) && continue; } && break
+    }; done
+    [[ $PASSWDCOUNTER -eq 3 ]] \
+    && zenity 2>/dev/null $ZMSGDIM02 --error --text "$ERRMSG02"
+
+  } elif [[ $MNTOP == "Unmount" ]] && [[ -n $AMNDIR ]]; then {
+    [[ -n $AMNDIR ]] \
+      && [[ -d $AMNDIR ]] \
+      || AMNDIR=$(zenity 2>/dev/null --title="Select Directory To Unmount" \
+                --name="${0##*/} $MYVERSION" --file-selection --directory)
+ 
+    [[ -z $AMNDIR ]] && continue
+
+    [[ -n $AMNDIR ]] && fusermount -u $AMNDIR
+  } else {
+      continue
+  };fi
+
+}; done
