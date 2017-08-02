@@ -20,6 +20,7 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+# version 0.1.3 - Added some more logic tests to avoid error conditions
 # version 0.1.2 - Added manual entry of remote path
 # version 0.1.1 - Fixed some logic bugs
 # version 0.1.0 - Initial concept
@@ -58,6 +59,7 @@ showVersion() {
 MESSAGECMD="${g}xmessage"
 ZMSGDIM01='--width=320 --height=160'
 ZMSGDIM02='--width=320 --height=192'
+ZMSGDIM03='--width=400 --height=160'
 ERRMSG01="This system requires the installation of <span color='#FF0000'>sshfs</span> utility!\n\nThen, you can use <span color='#0000FF'>${0##*/}</span> to mount / unmount directories from remote machines."
 ERRMSG02="You have attempted unsuccessfuly <span color='#FF0000'>3 times</span> with what seems to be the wrong password...\n\nReturning to the initial screen of ${0##*/}..."
 
@@ -69,10 +71,12 @@ ERRMSG02="You have attempted unsuccessfuly <span color='#FF0000'>3 times</span> 
 
 MYVERSION=$(grep '^# version' $0 | cut -f3 -d\  | sort -r | head -1)
 
-RCFILE=$HOME/.SXsshfsGUIrc
-MNTPLIST=$(paste 2>/dev/null -s -d'|' $RCFILE)
-
 while true; do {
+  RCFILE=$HOME/.SXsshfsGUIrc
+  MNTPLIST=$(paste 2>/dev/null -s -d'|' $RCFILE)
+  MOUNTEDLIST="$(mount | grep 'fuse.sshfs' | awk '{ print $3 }' | paste -s -d'|')"
+
+  [[ -n $MNTPLIST ]] && MNTPLIST="|$MNTPLIST"
 
   ZOPERATION=$(zenity 2>/dev/null \
     --cancel-label="Quit ${0##*/}" \
@@ -85,9 +89,9 @@ while true; do {
     --combo-values="Mount|Unmount|Refresh" \
     --add-entry="Remote Directory: " \
     --add-combo="Remote Directory:" \
-    --combo-values="|$MNTPLIST" \
+    --combo-values="$MNTPLIST" \
     --add-list="Mounted Directories:" \
-    --list-values="$(mount | grep 'fuse.sshfs' | awk '{ print $3 }' | paste -s -d'|')" \
+    --list-values="$MOUNTEDLIST" \
     --add-combo="Click Drop-down Help:" \
     --combo-values="$HELPSTRING") 
 
@@ -105,9 +109,24 @@ while true; do {
     REMADDR=$(echo $REMDIR | cut -f1 -d\:)
     $(ping -c 1 $REMADDR &>/dev/null) || { zenity 2>/dev/null --width=288 --height=128 --error --text "The host <span color='#0000FF'>$REMADDR</span> is not available at this time...\n\nReturning to the initial screen of ${0##*/}..." && continue; }
 
-    MNTDIR=$(zenity 2>/dev/null --title="Select Mount Point" --name="${0##*/} $MYVERSION" --file-selection --directory)
+    MNTDIR=$(zenity 2>/dev/null --title="Select Mount Point" --name="${0##*/} $MYVERSION" --file-selection --directory) || continue
     MNTDIR=$(echo $MNTDIR | sed -e 's@,@@')
-    [[ $MNTDIR == $HOME ]] || [[ -z $MNTDIR ]] && continue
+
+    [[ $MNTDIR == $HOME ]] || [[ -z $MNTDIR ]] \
+      && zenity 2>/dev/null $ZMSGDIM03 --error \
+        --text "Bad mountpoint choice: <span color='#FF0000'>$MNTDIR</span>" \
+      && continue
+
+    [[ $MOUNTEDLIST =~ $MNTDIR ]] \
+      && zenity 2>/dev/null $ZMSGDIM03 --error \
+        --text "Mountpoint <span color='#FF0000'>$MNTDIR</span> is already in use!" \
+      && continue
+
+    [[ -n $(ls -A $MNTDIR) ]] \
+      && zenity 2>/dev/null $ZMSGDIM03 --error \
+        --text "Mountpoint <span color='#FF0000'>$MNTDIR</span> is not empty!" \
+      && continue
+
     PASSWDCOUNTER=0
 
     while [[ $PASSWDCOUNTER -lt 3 ]]; do {
